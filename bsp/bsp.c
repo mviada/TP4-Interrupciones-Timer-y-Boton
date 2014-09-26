@@ -1,3 +1,5 @@
+
+
 #include <stdint.h>
 #include "stm32f4xx.h"			// Header del micro
 #include "stm32f4xx_gpio.h"		// Perifericos de E/S
@@ -20,11 +22,19 @@ GPIO_TypeDef* leds_port[] = { GPIOD, GPIOD, GPIOD, GPIOD };
 /* Leds disponibles */
 const uint16_t leds[] = { LED_V, LED_R, LED_N, LED_A };
 
+
+extern void APP_ISR_sw(void);
+
+
 void led_on(uint8_t led) {
 	GPIO_SetBits(leds_port[led], leds[led]);
 }
 
 void led_off(uint8_t led) {
+	GPIO_ResetBits(leds_port[led], leds[led]);
+}
+
+void led_toggle(uint8_t led){
 	GPIO_ResetBits(leds_port[led], leds[led]);
 }
 
@@ -39,9 +49,12 @@ void EXTI0_IRQHandler(void) {
 
 	if (EXTI_GetITStatus(EXTI_Line0) != RESET) //Verificamos si es la del pin configurado
 			{
-		EXTI_ClearFlag(EXTI_Line0); // Limpiamos la Interrupcion
+		EXTI_ClearFlag(EXTI_Line0); // Limpiamos la Interrupcion(bajo la bandera)
 		// Rutina:
-		GPIO_ToggleBits(leds_port[1], leds[1]);
+		APP_ISR_sw();
+		GPIO_ToggleBits(leds_port[1], leds[1]);///hace un toggle del bit
+
+
 	}
 }
 
@@ -111,20 +124,20 @@ void bsp_sw_init() {
 
 	// Configuro interrupcion
 
-	SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOA, EXTI_PinSource0);
+	SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOA, EXTI_PinSource0);//configuro que pines va a ser interrupcion
 
 	/* Configuro EXTI Line */
 	EXTI_InitStructure.EXTI_Line = EXTI_Line0;
 	EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
-	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising;
+	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising;//flanco ascendente
 	EXTI_InitStructure.EXTI_LineCmd = ENABLE;
 	EXTI_Init(&EXTI_InitStructure);
 
 	/* Habilito la EXTI Line Interrupt */
 	NVIC_InitStructure.NVIC_IRQChannel = EXTI0_IRQn;
-	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;//prioridad
 	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x01;
-	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;//habilito el canal
 	NVIC_Init(&NVIC_InitStructure);
 }
 
@@ -135,7 +148,7 @@ void bsp_timer_config(void) {
 	TIM_TimeBaseInitTypeDef TIM_TimeBaseStruct;
 	NVIC_InitTypeDef NVIC_InitStructure;
 	/* Habilito la interrupcion global del  TIM2 */
-	NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
+	NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;//config el timmer como inter
 	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
 	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;

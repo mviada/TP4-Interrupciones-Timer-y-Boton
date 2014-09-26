@@ -25,4 +25,5 @@ uint8_t sw_getState();
  */
 void bsp_init();
 
+void led_toggle(uint8_t led);
 #endif
