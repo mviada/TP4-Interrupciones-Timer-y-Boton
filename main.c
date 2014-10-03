@@ -16,7 +16,7 @@ int main(void) {
 	bsp_init();
 	int brillo = 0;
 	int flag = 0;
-
+	float acc_x;
 	while (1) {
 		bsp_delayMs(30);
 
@@ -35,6 +35,8 @@ int main(void) {
 			brillo++;
 		else
 			brillo--;
+		acc_x = bsp_get_acc('x');
+
 	}
 }
 
