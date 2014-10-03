@@ -1,5 +1,3 @@
-
-
 #include <stdint.h>
 #include "stm32f4xx.h"			// Header del micro
 #include "stm32f4xx_gpio.h"		// Perifericos de E/S
@@ -22,11 +20,13 @@ GPIO_TypeDef* leds_port[] = { GPIOD, GPIOD, GPIOD, GPIOD };
 /* Leds disponibles */
 const uint16_t leds[] = { LED_V, LED_R, LED_N, LED_A };
 
+uint32_t* const leds_pwm[] = { &TIM4->CCR1, &TIM4->CCR3,
+		&TIM4->CCR2, &TIM4->CCR4 };
 
 extern void APP_ISR_sw(void);
 extern void APP_ISR_1ms(void);
 
-
+volatile uint16_t bsp_contMS = 0;
 
 void led_on(uint8_t led) {
 	GPIO_SetBits(leds_port[led], leds[led]);
@@ -36,12 +36,25 @@ void led_off(uint8_t led) {
 	GPIO_ResetBits(leds_port[led], leds[led]);
 }
 
-void led_toggle(uint8_t led){
-	GPIO_ResetBits(leds_port[led], leds[led]);
+void led_toggle(uint8_t led) {
+	GPIO_ToggleBits(leds_port[led], leds[led]);
 }
 
 uint8_t sw_getState(void) {
 	return GPIO_ReadInputDataBit(GPIOA, BOTON);
+}
+
+void led_setBright(uint8_t led, uint8_t value) {
+
+	*leds_pwm[led] = 10000 * value / 100;
+}
+
+void bsp_delayMs(uint16_t x) {
+	bsp_contMS = x;
+
+	while (bsp_contMS)
+		;
+
 }
 
 /**
@@ -51,12 +64,9 @@ void EXTI0_IRQHandler(void) {
 
 	if (EXTI_GetITStatus(EXTI_Line0) != RESET) //Verificamos si es la del pin configurado
 			{
-		EXTI_ClearFlag(EXTI_Line0); // Limpiamos la Interrupcion(bajo la bandera)
+		EXTI_ClearFlag(EXTI_Line0); // Limpiamos la Interrupcion
 		// Rutina:
 		APP_ISR_sw();
-		GPIO_ToggleBits(leds_port[1], leds[1]);///hace un toggle del bit
-
-
 	}
 }
 
@@ -64,12 +74,15 @@ void EXTI0_IRQHandler(void) {
  * @brief Interrupcion llamada al pasar 1ms
  */
 void TIM2_IRQHandler(void) {
-	//static uint16_t count = 0; //no quiero que se borre la ram
 
 	if (TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET) {
 		TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
-		APP_ISR_1ms();   ////aplicacion interrupcionn cada 1ms
 
+		APP_ISR_1ms();
+
+		if (bsp_contMS) {
+			bsp_contMS--;
+		}
 	}
 }
 
@@ -78,10 +91,11 @@ void bsp_sw_init();
 void bsp_timer_config();
 
 void bsp_init() {
-	bsp_led_init();
+	//bsp_led_init();
+	bsp_pwm_config();
+
 	bsp_sw_init();
 	bsp_timer_config();
-
 }
 
 /**
@@ -124,20 +138,20 @@ void bsp_sw_init() {
 
 	// Configuro interrupcion
 
-	SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOA, EXTI_PinSource0);//configuro que pines va a ser interrupcion
+	SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOA, EXTI_PinSource0);
 
 	/* Configuro EXTI Line */
 	EXTI_InitStructure.EXTI_Line = EXTI_Line0;
 	EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
-	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising;//flanco ascendente
+	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising;
 	EXTI_InitStructure.EXTI_LineCmd = ENABLE;
 	EXTI_Init(&EXTI_InitStructure);
 
 	/* Habilito la EXTI Line Interrupt */
 	NVIC_InitStructure.NVIC_IRQChannel = EXTI0_IRQn;
-	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;//prioridad
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
 	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x01;
-	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;//habilito el canal
+	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
 	NVIC_Init(&NVIC_InitStructure);
 }
 
@@ -148,7 +162,7 @@ void bsp_timer_config(void) {
 	TIM_TimeBaseInitTypeDef TIM_TimeBaseStruct;
 	NVIC_InitTypeDef NVIC_InitStructure;
 	/* Habilito la interrupcion global del  TIM2 */
-	NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;//config el timmer como inter
+	NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
 	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
 	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
@@ -166,5 +180,71 @@ void bsp_timer_config(void) {
 	TIM_ITConfig(TIM2, TIM_IT_Update, ENABLE);
 	/* TIM2 contador habilitado */
 	TIM_Cmd(TIM2, ENABLE);
+
+}
+
+void bsp_pwm_config(void) {
+	TIM_TimeBaseInitTypeDef TIM_config;
+	GPIO_InitTypeDef GPIO_config;
+	TIM_OCInitTypeDef TIM_OC_config;
+
+	/* Habilito el clock de los perisfericos */
+	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
+
+	/* Configuro leds como Segunda Funcion */
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOD, ENABLE);
+
+	GPIO_config.GPIO_Mode = GPIO_Mode_AF;
+	GPIO_config.GPIO_Pin = GPIO_Pin_15 | GPIO_Pin_14 | GPIO_Pin_13 | GPIO_Pin_12;
+	GPIO_config.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_config.GPIO_PuPd = GPIO_PuPd_UP;
+	GPIO_config.GPIO_OType = GPIO_OType_PP;
+
+	GPIO_Init(GPIOD, &GPIO_config);
+
+	GPIO_PinAFConfig(GPIOD, GPIO_PinSource15, GPIO_AF_TIM4);
+	GPIO_PinAFConfig(GPIOD, GPIO_PinSource14, GPIO_AF_TIM4);
+	GPIO_PinAFConfig(GPIOD, GPIO_PinSource13, GPIO_AF_TIM4);
+	GPIO_PinAFConfig(GPIOD, GPIO_PinSource12, GPIO_AF_TIM4);
+
+	TIM_config.TIM_CounterMode = TIM_CounterMode_Up;
+	TIM_config.TIM_ClockDivision = 0;
+	TIM_config.TIM_Period = 10000;
+	TIM_config.TIM_Prescaler = 16 - 1;
+	TIM_TimeBaseInit(TIM4, &TIM_config);
+
+	TIM_OC_config.TIM_OCMode = TIM_OCMode_PWM1;
+	TIM_OC_config.TIM_OutputState = TIM_OutputState_Enable;
+	TIM_OC_config.TIM_Pulse = 0;
+	TIM_OC_config.TIM_OCPolarity = TIM_OCPolarity_High;
+
+	// CH1 del pwm
+	TIM_OC1Init(TIM4, &TIM_OC_config);
+	TIM_OC1PreloadConfig(TIM4, TIM_OCPreload_Enable);
+
+	//CH2 del pwm
+	TIM_OC_config.TIM_OutputState = TIM_OutputState_Enable;
+	TIM_OC_config.TIM_Pulse = 0;
+
+	TIM_OC2Init(TIM4, &TIM_OC_config);
+	TIM_OC2PreloadConfig(TIM4, TIM_OCPreload_Enable);
+
+	//CH3 del pwm
+	TIM_OC_config.TIM_OutputState = TIM_OutputState_Enable;
+	TIM_OC_config.TIM_Pulse = 0;
+
+	TIM_OC3Init(TIM4, &TIM_OC_config);
+	TIM_OC3PreloadConfig(TIM4, TIM_OCPreload_Enable);
+
+	//CH4 del pwm
+	TIM_OC_config.TIM_OutputState = TIM_OutputState_Enable;
+	TIM_OC_config.TIM_Pulse = 0;
+
+	TIM_OC4Init(TIM4, &TIM_OC_config);
+	TIM_OC4PreloadConfig(TIM4, TIM_OCPreload_Enable);
+
+	TIM_ARRPreloadConfig(TIM4, ENABLE);
+
+	TIM_Cmd(TIM4, ENABLE);
 
 }
